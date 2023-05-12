@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from airflow.providers.http.sensors.http import HttpSensor
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.python import PythonOperator
+from airflow.operators.bash import BashOperator
 
 import csv
 import requests
@@ -14,8 +15,8 @@ default_args={
     "email_on_failure" : False,
     "email_on_retry" : False,
     "email": "franklinmutwiri41@gmail.com",
-    "retries":10,
-    "retry_delay": timedelta(minutes=5)
+    "retries":5,
+    "retry_delay": timedelta(minutes=1)
 }
 
 def download_rates():
@@ -52,18 +53,18 @@ def download_rates():
                 # print(response['rates'][pair])
                 outdata['rates'][pair] = response['rates'][pair]
                 # print(outdata)
-            with open('/opt/airflow/dags/files/foreign_rates.json', 'a') as outfile:
+            with open('/opt/airflow/dags/files/forex_rates.json', 'a') as outfile:
                 json.dump(outdata, outfile)
                 outfile.write('\n')
 
- 
+download_rates()
 
 with DAG (
    dag_id= "forex_data_pipeline",
    start_date= datetime(2023,5,7,1),
    schedule_interval= "@daily",
    default_args=default_args,
-   catchup=False
+   catchup=True
 ) as dag:
     is_forex_rates_available = HttpSensor(
         task_id = "is_forex_rates_available",
@@ -86,4 +87,13 @@ with DAG (
         python_callable=download_rates
     )
 
+    saving_rates_to_hadoop = BashOperator(
+        task_id ="saving_rates_to_hadoop",
+        bash_command="""
+            hdfs dfs -mkdir -p /forex && \
+            hdfs dfs -put -f $AIRFLOW_HOME/dags/files/forex_rates.json /forex
+            """
+    )
+
     is_forex_rates_available >> is_forex_raw_file_available >> download_rates
+
