@@ -1,0 +1,34 @@
+import csv
+import requests
+import json
+import os
+
+def download_rates():
+    BASE_URL = "https://gist.githubusercontent.com/marclamberti/f45f872dea4dfd3eaa015a4a1af4b39b/raw/"
+    ENDPOINTS = {
+        'USD': 'api_forex_exchange_usd.json',
+        'EUR': 'api_forex_exchange_eur.json'
+    }
+    with open( 'forex_currencies.csv' ) as forex_currencies:
+        reader = csv.DictReader(forex_currencies, delimiter=';')
+        
+        for idx, row in enumerate(reader):
+            # print(row)
+            base = row['base']
+            with_pairs = row['with_pairs'].split(" ")
+            response = requests.get(f"{BASE_URL}{ENDPOINTS[base]}").json()
+            # print(f"{BASE_URL}{ENDPOINTS[base]}")
+            outdata = {'base': base, 'rates': {}, 'last_update': response['date'] }
+            # print(outdata)
+            for pair in with_pairs:
+                # print(response['rates'][pair])
+                outdata['rates'][pair] = response['rates'][pair]
+                # print(outdata)
+            with open('foreign_rates.json', 'a') as outfile:
+                json.dump(outdata, outfile)
+                outfile.write('\n')
+ 
+
+download_rates()
+
+
