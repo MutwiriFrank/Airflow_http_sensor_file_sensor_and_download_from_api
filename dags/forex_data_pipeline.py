@@ -4,6 +4,9 @@ from airflow.providers.http.sensors.http import HttpSensor
 from airflow.sensors.filesystem import FileSensor
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.providers.apache.hive.operators.hive import HiveOperator
+from airflow.providers.apache.spark.operators.spark_submit import SparkSubmitOperator
+
 
 import csv
 import requests
@@ -19,18 +22,7 @@ default_args={
     "retry_delay": timedelta(minutes=1)
 }
 
-def download_rates():
-    BASE_URL = "https://gist.githubusercontent.com/marclamberti/f45f872dea4dfd3eaa015a4a1af4b39b/raw/"
-    ENDPOINTS = {
-        'USD': 'api_forex_exchange_usd.json',
-        'EUR': 'api_forex_exchange_eur.json'
-    }
-    with open( '/opt/airflow/dags/files/forex_currencies.csv' ) as forex_currencies:
-        reader = csv.DictReader(forex_currencies, delimiter=',')
-        for idx, row in enumerate(reader):
-            base = row['base']
-            with_pairs = row['with_pairs'].splt(" ")
-            response = requests.get(f"{BASE_URL}{ENDPOINTS[base]}").json()
+
 
 def download_rates():
     BASE_URL = "https://gist.githubusercontent.com/marclamberti/f45f872dea4dfd3eaa015a4a1af4b39b/raw/"
@@ -57,14 +49,14 @@ def download_rates():
                 json.dump(outdata, outfile)
                 outfile.write('\n')
 
-download_rates()
+
 
 with DAG (
    dag_id= "forex_data_pipeline",
-   start_date= datetime(2023,5,7,1),
+   start_date= datetime(2023,5,11,1),
    schedule_interval= "@daily",
    default_args=default_args,
-   catchup=True
+#    catchup=False
 ) as dag:
     is_forex_rates_available = HttpSensor(
         task_id = "is_forex_rates_available",
@@ -95,5 +87,35 @@ with DAG (
             """
     )
 
-    is_forex_rates_available >> is_forex_raw_file_available >> download_rates
+    creating_forex_rates_table = HiveOperator(
+    task_id="creating_forex_rates_table",
+    hive_cli_conn_id="hive_conn",
+    hql="""
+        CREATE EXTERNAL TABLE IF NOT EXISTS forex_rates(
+            base STRING,
+            last_update DATE,
+            eur DOUBLE,
+            usd DOUBLE,
+            nzd DOUBLE,
+            gbp DOUBLE,
+            jpy DOUBLE,
+            cad DOUBLE
+            )
+        ROW FORMAT DELIMITED
+        FIELDS TERMINATED BY ','
+        STORED AS TEXTFILE
+    """
+    )
+
+    forex_processing = SparkSubmitOperator(
+        task_id = "forex_processing",
+        application="/opt/airflow/dags/scripts/forex_processing.py",
+        conn_id ='spark_conn',
+        verbose=False
+    )
+
+
+
+
+    is_forex_rates_available >> is_forex_raw_file_available >> download_rates>>saving_rates_to_hadoop >> creating_forex_rates_table
 
